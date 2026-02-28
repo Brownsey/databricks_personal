@@ -1,0 +1,38 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"irm https://raw.githubusercontent.com/databricks-solutions/ai-dev-kit/main/install.ps1 | iex\")",
+      "Read(//c/Users/Stephen/Documents/databricks_personal/$USERPROFILE/.claude/**)",
+      "Bash(databricks tables list --catalog-name main --schema-name default --profile DEFAULT)",
+      "Bash(powershell.exe -NoProfile -Command \"databricks tables list --catalog-name main --schema-name default --profile DEFAULT 2>&1\")",
+      "Bash(powershell.exe -NoProfile -Command \"Get-Command databricks -ErrorAction SilentlyContinue | Format-List Source; where.exe databricks 2>&1\")",
+      "Read(//c/Users/Stephen/**)",
+      "Bash(\"C:/Users/Stephen/.ai-dev-kit/.venv/Scripts/python.exe\" \"C:/Users/Stephen/.ai-dev-kit/repo/databricks-mcp-server/run_server.py\")",
+      "Bash(python -c \":*)",
+      "Bash(\"C:/Users/Stephen/.ai-dev-kit/.venv/Scripts/python.exe\" -c \"import databricks.sdk; print\\(''databricks-sdk version:'', databricks.sdk.__version__\\)\")",
+      "Bash(\"C:/Users/Stephen/.ai-dev-kit/.venv/Scripts/python.exe\" -c \"import databricks.sdk; print\\(''SDK imported OK''\\); from databricks.sdk import WorkspaceClient; print\\(''WorkspaceClient OK''\\)\")",
+      "Bash(\"C:/Users/Stephen/.ai-dev-kit/.venv/Scripts/python.exe\" -c \"from databricks_mcp_server.server import mcp; print\\(''MCP server module imported OK''\\)\")",
+      "Bash(\"C:/Users/Stephen/.ai-dev-kit/.venv/Scripts/python.exe\" -c \":*)",
+      "Read(//c/Users/Stephen/Documents/databricks_personal/$APPDATA/Claude/**)",
+      "Bash(tasklist)",
+      "Read(//c/Users/Stephen/Documents/databricks_personal/$HOME/**)",
+      "Read(//c/Users/Stephen/Documents/databricks_personal/$HOME/.claude/**)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\(''mcpServers'',{}\\), indent=2\\)\\)\")",
+      "Read(//c/Users/Stephen/Documents/databricks_personal/$HOME/.ai-dev-kit/repo/**)",
+      "Bash(git -C /c/Users/Stephen/Documents/databricks_personal status)",
+      "Bash(uv run ruff check src register_model.py tasks.py)",
+      "Bash(uv run ruff format --check src register_model.py tasks.py)",
+      "Bash(uv run ruff format src register_model.py tasks.py)",
+      "Bash(uv run ruff check tests/)",
+      "Bash(uv run ruff format tests/)",
+      "Bash(uv run ruff check --fix tests/)",
+      "Bash(uv run pytest tests/ -v --no-cov)",
+      "Bash(uv run ruff check src register_model.py tasks.py tests/)",
+      "Bash(uv run ruff format src register_model.py tasks.py tests/)",
+      "Bash(uv run python -c \":*)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\Stephen"
+    ]
+  }
+}
