@@ -15,8 +15,8 @@ targets:
     default: true
     mode: development
     workspace:
-      host: https://dbc-dfbd14c3-c3d3.cloud.databricks.com
+      profile: DEFAULT
 
   prod:
     workspace:
-      host: https://dbc-dfbd14c3-c3d3.cloud.databricks.com
+      profile: DEFAULT

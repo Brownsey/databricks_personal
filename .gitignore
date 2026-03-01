@@ -21,6 +21,9 @@ build/
 *.swp
 *.swo
 
+# Databricks
+.databricks/
+
 # OS
 .DS_Store
 Thumbs.db
