@@ -35,7 +35,18 @@ uv run python register_model.py --deploy
 uv run python register_model.py --deploy --redeploy
 ```
 
-**Use a different HuggingFace model (e.g. text generation):**
+**Deploy Qwen2.5-0.5B for text generation:**
+
+```bash
+uv run python register_model.py \
+  --model-id Qwen/Qwen2.5-0.5B \
+  --task text-generation \
+  --model-name qwen25_05b \
+  --artifact-path qwen_model \
+  --deploy
+```
+
+**Use a different HuggingFace model (e.g. GPT-2 text generation):**
 
 ```bash
 uv run python register_model.py \
@@ -105,6 +116,29 @@ uv run python register_model.py \
 ```
 
 Run `uv run python register_model.py --help` for the full argument reference.
+
+---
+
+## Tested Models
+
+| Model | Task | Size | Status | Notes |
+|-------|------|------|--------|-------|
+| `distilbert-base-uncased-finetuned-sst-2-english` | `sentiment-analysis` | ~260 MB | Registered + Deployed | Default model. Fast inference on CPU small compute. |
+| `Qwen/Qwen2.5-0.5B` | `text-generation` | ~1 GB | Registered + Deployed | Endpoint takes ~9 min to reach READY. Slow CPU inference. See [limitations](#limitations). |
+
+## Supported Tasks
+
+The pipeline supports any HuggingFace `pipeline()` task. The MLflow signature and predict wrapper adapt automatically based on the task type:
+
+| Task | Output Format | Recommended Models |
+|------|---------------|--------------------|
+| `sentiment-analysis` / `text-classification` | label + score | DistilBERT, RoBERTa |
+| `text-generation` | generated text (`max_new_tokens` configurable) | GPT-2, Qwen2.5-0.5B |
+| `ner` | token-level entities | `dslim/bert-base-NER` |
+| `fill-mask` | token predictions | `bert-base-uncased` |
+| `question-answering` | extractive answer + score | `deepset/roberta-base-squad2` |
+| `zero-shot-classification` | label rankings | `facebook/bart-large-mnli` |
+| `feature-extraction` | embedding vectors | `sentence-transformers/all-MiniLM-L6-v2` |
 
 ---
 
@@ -242,7 +276,8 @@ Arguments are organized into logical groups:
 ```
 .
 ├── register_model.py              # CLI entry point + composition root
-├── tasks.py                       # Task runner (lint, test, format)
+├── test_deployments.py            # Test all deployed serving endpoints
+├── tasks.py                       # Task runner (lint, test, format, deploy tests)
 ├── pyproject.toml                 # Dependencies and tool config
 ├── .env                           # Databricks credentials (not committed)
 ├── src/
@@ -268,21 +303,70 @@ Arguments are organized into logical groups:
 
 ## Development
 
+All tasks are run via `tasks.py`:
+
 ```bash
-# Install dev dependencies
-uv sync --group dev
+uv run python tasks.py help       # Show all available tasks
+```
 
-# Lint
-uv run python tasks.py lint
+### Setup
 
-# Format
-uv run python tasks.py format
+| Task | Command | Description |
+|------|---------|-------------|
+| `install` | `uv run python tasks.py install` | Install all dependencies with UV |
 
-# Run tests
-uv run python tasks.py test
+### Code Quality
 
-# Full pipeline (install + lint + test)
-uv run python tasks.py all
+| Task | Command | Description |
+|------|---------|-------------|
+| `ruff` | `uv run python tasks.py ruff` | Run ruff linter |
+| `ruff-fix` | `uv run python tasks.py ruff-fix` | Run ruff with auto-fix |
+| `format` | `uv run python tasks.py format` | Format code with ruff |
+| `format-check` | `uv run python tasks.py format-check` | Check code formatting |
+| `ty` | `uv run python tasks.py ty` | Run ty type checker (Astral) |
+| `lint` | `uv run python tasks.py lint` | Run all linters (ruff + format check) |
+
+### Testing
+
+| Task | Command | Description |
+|------|---------|-------------|
+| `test` | `uv run python tasks.py test` | Run unit/integration tests with pytest |
+| `test-deployment` | `uv run python tasks.py test-deployment` | Test all deployed serving endpoints |
+| `coverage` | `uv run python tasks.py coverage` | Run tests with coverage report |
+
+### Pipeline
+
+| Task | Command | Description |
+|------|---------|-------------|
+| `all` | `uv run python tasks.py all` | Full pipeline: install, lint, test |
+
+### Testing Deployed Endpoints
+
+`test-deployment` discovers all serving endpoints backed by models in your catalog/schema, sends a test query to each READY endpoint, and prints a summary:
+
+```bash
+uv run python tasks.py test-deployment
+```
+
+You can also run it directly with custom catalog/schema:
+
+```bash
+uv run python test_deployments.py --catalog workspace --schema ml_models
+```
+
+Example output:
+
+```
+  Endpoint                 | Model                  | Ver  | Task                   | State     | Test    | Latency
+  -------------------------+------------------------+------+------------------------+-----------+---------+----------
+  distilbert-sentiment     | distilbert_sentiment   | 24   | sentiment-analysis     | READY     | PASS    | 856
+  qwen25-05b               | qwen25_05b             | 2    | text-generation        | READY     | PASS    | 12780
+
+  Response Previews:
+  [+] distilbert-sentiment: {'label': 'POSITIVE', 'score': 0.9998855590820312}
+  [+] qwen25-05b: {'generated_text': '! I'm 16 and I'm just trying to find a good math tutor...
+
+  Total: 2 | Passed: 2 | Failed: 0 | Skipped: 0
 ```
 
 ## Requirements
@@ -290,6 +374,42 @@ uv run python tasks.py all
 - Python >= 3.10
 - A Databricks workspace with Unity Catalog enabled
 - A `.env` file with `DATABRICKS_HOST` and `DATABRICKS_TOKEN`
+
+---
+
+## Limitations
+
+### Databricks Free Tier / Serverless Small Compute
+
+- **~2 CPU cores, limited RAM.** Adequate for encoder models (BERT, DistilBERT, RoBERTa) but marginal for generative models.
+- **DAB deployment fails** on free-tier workspaces due to S3 path-style URL issues (`PermanentRedirect`). Running the CLI locally works fine. Expected to work on paid workspaces.
+
+### CPU-Only Inference
+
+- The pipeline uses **CPU-only PyTorch** to keep container images small (~200 MB vs 4+ GB with GPU).
+- **Encoder models** (DistilBERT, RoBERTa) return results in **milliseconds** on CPU — ideal for this setup.
+- **Generative models** (Qwen2.5-0.5B, GPT-2) are **very slow on CPU** — expect several seconds per response. Not practical for production use without GPU compute.
+- Models above ~1B parameters will likely OOM or timeout on Small compute.
+
+### Model Size and Cold Start
+
+- Model weights are **downloaded from HuggingFace Hub at serving time** (each container startup). Large models increase cold-start time significantly.
+- No local caching between container restarts on serverless compute.
+- Practical maximum for a smooth experience: **~1 GB** of model weights. Qwen2.5-0.5B (~1 GB) is at the upper limit and took ~9 minutes for the endpoint to reach READY.
+- Models above ~2 GB (Qwen2.5-1.5B, LLaMA 3B, BART-large) will likely timeout during container startup.
+
+### Text Generation Specifically
+
+- Output is capped at `max_new_tokens=100` by default to prevent CPU timeouts. Override via the `params` argument when querying the endpoint.
+- `return_full_text=False` — responses contain only generated text, not the input prompt.
+- A 0.5B parameter model produces limited quality output. Expect short, sometimes incoherent text continuations. This is a deployment demonstration, not a production LLM.
+
+### General
+
+- **Input format**: All models expect a single-column text DataFrame. Multi-input tasks (e.g., question-answering with separate question + context fields) require the caller to format input accordingly.
+- **No streaming**: Endpoints return the full response synchronously. SSE/streaming is not implemented.
+- **Single model per endpoint**: Each deployment creates one endpoint serving one model version.
+- **No quantisation**: Models run at full precision (fp32). INT8/INT4 quantisation could improve performance for generative models but is not currently supported.
 
 ---
 

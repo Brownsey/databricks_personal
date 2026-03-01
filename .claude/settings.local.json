@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv run python register_model.py --model-id Qwen/Qwen2.5-0.5B --task text-generation --model-name qwen25_05b --artifact-path qwen_model)",
+      "Bash(uv run python register_model.py --model-id Qwen/Qwen2.5-0.5B --task text-generation --model-name qwen25_05b --artifact-path qwen_model --deploy --redeploy --no-register)",
+      "Bash(uv run python register_model.py --model-id Qwen/Qwen2.5-0.5B --task text-generation --model-name qwen25_05b --artifact-path qwen_model --deploy --redeploy)",
+      "Bash(uv run task test-deployment)",
+      "Bash(uv run python tasks.py test-deployment)"
+    ]
+  }
+}

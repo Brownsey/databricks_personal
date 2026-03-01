@@ -28,6 +28,27 @@ class MLflowAdaptor:
         self._artifact_path = artifact_path
         self._region = region
 
+    @staticmethod
+    def _infer_signature(task: str):
+        """Return an MLflow signature appropriate for the HuggingFace task."""
+        input_df = pd.DataFrame(["sample text"], columns=["text"])
+
+        output_examples = {
+            "sentiment-analysis": {"label": "POSITIVE", "score": 0.99},
+            "text-classification": {"label": "POSITIVE", "score": 0.99},
+            "ner": {"entity": "PER", "score": 0.99, "word": "John", "start": 0, "end": 4},
+            "text-generation": {"generated_text": "sample output"},
+            "fill-mask": {"token_str": "hello", "score": 0.99, "sequence": "hello world"},
+            "question-answering": {"answer": "yes", "score": 0.99, "start": 0, "end": 3},
+            "zero-shot-classification": {"labels": ["a"], "scores": [0.99], "sequence": "text"},
+            "feature-extraction": {"embedding": [0.0] * 10},
+        }
+
+        example = output_examples.get(
+            task, {"label": "LABEL", "score": 0.99}
+        )
+        return mlflow.models.infer_signature(input_df, pd.DataFrame([example]))
+
     def log_model(
         self,
         model: Any,
@@ -73,10 +94,7 @@ class MLflowAdaptor:
                     "name": "mlflow-env",
                 }
 
-                signature = mlflow.models.infer_signature(
-                    pd.DataFrame(["text input"], columns=["text"]),
-                    pd.DataFrame([{"label": "POSITIVE", "score": 0.99}]),
-                )
+                signature = self._infer_signature(task)
 
                 # Define wrapper inline so CloudPickle serialises it by value
                 # (not by module reference). This avoids the serving container
@@ -86,11 +104,21 @@ class MLflowAdaptor:
                         from transformers import pipeline as hf_pipeline
 
                         cfg = context.model_config
+                        self._task = cfg["task"]
                         self._pipe = hf_pipeline(cfg["task"], model=cfg["model_id"])
 
                     def predict(self, context, model_input: pd.DataFrame, params=None) -> pd.DataFrame:
                         texts = model_input.iloc[:, 0].tolist()
-                        results = self._pipe(texts)
+                        kwargs = {}
+                        if self._task == "text-generation":
+                            kwargs["max_new_tokens"] = int(
+                                (params or {}).get("max_new_tokens", 100)
+                            )
+                            kwargs["return_full_text"] = False
+                        results = self._pipe(texts, **kwargs)
+                        # text-generation returns nested lists: [[{...}], [{...}]]
+                        if results and isinstance(results[0], list):
+                            results = [r[0] for r in results]
                         return pd.DataFrame(results)
 
                 model_info = mlflow.pyfunc.log_model(

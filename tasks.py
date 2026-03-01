@@ -8,7 +8,7 @@ Usage: uv run task <target>
 import subprocess
 import sys
 
-SRC = ["src", "register_model.py", "tasks.py"]
+SRC = ["src", "register_model.py", "test_deployments.py", "tasks.py"]
 
 
 def _run(*cmd: str) -> int:
@@ -76,6 +76,14 @@ def task_coverage() -> int:
     )
 
 
+# ── Deployment Testing ────────────────────────────────
+
+
+def task_test_deployment() -> int:
+    print("Testing deployed model serving endpoints...")
+    return _run("uv", "run", "python", "test_deployments.py")
+
+
 # ── Setup ──────────────────────────────────────────────
 
 
@@ -115,6 +123,7 @@ TASKS: dict[str, tuple[str, object]] = {
     "ty": ("Run ty type checker (Astral)", task_ty),
     "lint": ("Run all linters (ruff + format check)", task_lint),
     "test": ("Run tests with pytest", task_test),
+    "test-deployment": ("Test deployed serving endpoints", task_test_deployment),
     "coverage": ("Run tests with coverage report", task_coverage),
     "all": ("Full pipeline: install, lint, test", task_all),
 }
@@ -122,7 +131,7 @@ TASKS: dict[str, tuple[str, object]] = {
 SECTIONS = {
     "Setup": ["install"],
     "Code Quality": ["ruff", "ruff-fix", "format", "format-check", "ty", "lint"],
-    "Testing": ["test", "coverage"],
+    "Testing": ["test", "test-deployment", "coverage"],
     "Pipeline": ["all"],
 }
 

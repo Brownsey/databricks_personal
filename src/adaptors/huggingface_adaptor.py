@@ -20,8 +20,11 @@ class HuggingFaceAdaptor:
             logger.info("Downloading HuggingFace model: %s (task=%s)", model_id, task)
             pipe = pipeline(task, model=model_id)
 
-            # Sanity check
-            test_result = pipe("This is a test sentence.")
+            # Sanity check — limit generation length for generative models
+            sanity_kwargs = {}
+            if task == "text-generation":
+                sanity_kwargs["max_new_tokens"] = 20
+            test_result = pipe("This is a test sentence.", **sanity_kwargs)
             logger.info("Sanity check passed: %s", test_result)
 
             return Ok(pipe)
