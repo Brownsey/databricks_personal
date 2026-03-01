@@ -27,13 +27,16 @@ def register_model_pipeline(
     *,
     serving: ModelServingPort | None = None,
     deploy: bool = False,
+    register: bool = True,
+    endpoint_name: str | None = None,
+    artifact_path: str = "sentiment_model",
 ) -> Result[ModelRegistrationResult, ModelPipelineError]:
     """Run the full model registration pipeline.
 
-    1. Ensure target schema exists in Unity Catalog
+    1. Ensure target schema exists in Unity Catalog (if register=True)
     2. Load model from external source
     3. Log model to experiment tracker and register in catalog
-    4. Verify registration
+    4. Verify registration (if register=True)
     5. (Optional) Deploy to a serving endpoint
 
     Args:
@@ -47,17 +50,21 @@ def register_model_pipeline(
         task: Model task type (e.g. "sentiment-analysis")
         serving: Port for deploying model serving endpoints (required if deploy=True)
         deploy: Whether to deploy the model to a serving endpoint (default: False)
+        register: Whether to register the model in Unity Catalog (default: True)
+        endpoint_name: Override for serving endpoint name (default: derived from model_name)
+        artifact_path: MLflow artifact path for the logged model (default: "sentiment_model")
 
     Returns:
         Result containing ModelRegistrationResult or error
     """
-    registered_model_name = f"{catalog}.{schema}.{model_name}"
+    registered_model_name = f"{catalog}.{schema}.{model_name}" if register else None
 
-    # Step 1: Ensure target schema exists
-    logger.info("Ensuring schema %s.%s exists", catalog, schema)
-    schema_result = registry.ensure_schema(catalog, schema)
-    if isinstance(schema_result, Err):
-        return schema_result  # type: ignore[return-value]
+    # Step 1: Ensure target schema exists (only when registering in UC)
+    if register:
+        logger.info("Ensuring schema %s.%s exists", catalog, schema)
+        schema_result = registry.ensure_schema(catalog, schema)
+        if isinstance(schema_result, Err):
+            return schema_result  # type: ignore[return-value]
 
     # Step 2: Load model from external source
     logger.info("Loading model: %s", model_id)
@@ -67,8 +74,9 @@ def register_model_pipeline(
 
     model = model_result.value
 
-    # Step 3: Log model and register in Unity Catalog
-    logger.info("Logging model to tracker and registering as %s", registered_model_name)
+    # Step 3: Log model (and register in Unity Catalog if register=True)
+    log_target = registered_model_name or "(MLflow only, no UC registration)"
+    logger.info("Logging model to tracker and registering as %s", log_target)
     run_result = tracker.log_model(
         model=model,
         task=task,
@@ -79,6 +87,19 @@ def register_model_pipeline(
         return run_result  # type: ignore[return-value]
 
     run_id = run_result.value
+
+    # If not registering in UC, return early with minimal result
+    if not register:
+        return Ok(
+            ModelRegistrationResult(
+                registered_model_name=f"{catalog}.{schema}.{model_name}",
+                run_id=run_id,
+                model_uri=f"runs:/{run_id}/{artifact_path}",
+                model_info={},
+                versions=[],
+                endpoint_name=None,
+            )
+        )
 
     # Step 4: Verify registration
     logger.info("Verifying registration for %s", registered_model_name)
@@ -91,37 +112,42 @@ def register_model_pipeline(
         return versions_result  # type: ignore[return-value]
 
     # Step 5: Optionally deploy to a serving endpoint
-    endpoint_name: str | None = None
+    resolved_endpoint: str | None = None
     if deploy and serving is not None:
         latest_version = str(max(int(v["version"]) for v in versions_result.value))
-        endpoint_name = model_name.replace("_", "-")
+        resolved_endpoint = endpoint_name or model_name.replace("_", "-")
         logger.info(
             "Deploying %s v%s to endpoint '%s'",
             registered_model_name,
             latest_version,
-            endpoint_name,
+            resolved_endpoint,
         )
         deploy_result = serving.deploy_endpoint(
-            endpoint_name=endpoint_name,
+            endpoint_name=resolved_endpoint,
             model_name=registered_model_name,
             model_version=latest_version,
         )
         if isinstance(deploy_result, Err):
             return deploy_result  # type: ignore[return-value]
 
-        ready_result = serving.wait_for_ready(endpoint_name)
+        ready_result = serving.wait_for_ready(resolved_endpoint)
         if isinstance(ready_result, Err):
             return ready_result  # type: ignore[return-value]
 
-        logger.info("Endpoint '%s' is READY", endpoint_name)
+        logger.info("Endpoint '%s' is READY", resolved_endpoint)
+
+        # Step 6: Configure AI Gateway (usage tracking, inference tables, rate limits)
+        gw_result = serving.configure_ai_gateway(resolved_endpoint)
+        if isinstance(gw_result, Err):
+            return gw_result  # type: ignore[return-value]
 
     return Ok(
         ModelRegistrationResult(
             registered_model_name=registered_model_name,
             run_id=run_id,
-            model_uri=f"runs:/{run_id}/sentiment_model",
+            model_uri=f"runs:/{run_id}/{artifact_path}",
             model_info=info_result.value,
             versions=versions_result.value,
-            endpoint_name=endpoint_name,
+            endpoint_name=resolved_endpoint,
         )
     )

@@ -63,3 +63,7 @@ class ModelServingPort(Protocol):
     def wait_for_ready(self, endpoint_name: str) -> Result[None, ServingError]:
         """Block until the endpoint reaches READY state."""
         ...
+
+    def configure_ai_gateway(self, endpoint_name: str) -> Result[dict, ServingError]:
+        """Apply AI Gateway configuration (usage tracking, inference tables, rate limits)."""
+        ...

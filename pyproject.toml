@@ -2,7 +2,7 @@
 name = "databricks-personal"
 version = "0.1.0"
 description = "Personal Databricks workspace project"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.11"
 dependencies = [
     "databricks-sdk>=0.38.0",
     "python-dotenv>=1.0.0",

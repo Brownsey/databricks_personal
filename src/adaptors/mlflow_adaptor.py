@@ -34,8 +34,16 @@ class _SentimentPyfuncWrapper(mlflow.pyfunc.PythonModel):
 class MLflowAdaptor:
     """Logs models to Databricks-managed MLflow and registers via Unity Catalog."""
 
-    def __init__(self, experiment_name: str) -> None:
+    def __init__(
+        self,
+        experiment_name: str,
+        *,
+        artifact_path: str = "sentiment_model",
+        region: str = "us-east-2",
+    ) -> None:
         self._experiment_name = experiment_name
+        self._artifact_path = artifact_path
+        self._region = region
 
     def log_model(
         self,
@@ -55,18 +63,42 @@ class MLflowAdaptor:
 
                 mlflow.set_tag("hf_model_id", model_id)
                 mlflow.set_tag("hf_task", task)
+                mlflow.set_tag("region", self._region)
                 mlflow.log_param("model_source", "huggingface")
                 mlflow.log_param("model_id", model_id)
                 mlflow.log_param("task", task)
 
                 logger.info("Logging model and registering as '%s'...", registered_model_name)
                 input_example = pd.DataFrame(["This movie was fantastic!"], columns=["text"])
+
+                # CPU-only torch keeps the serving container small (~200 MB vs 4+ GB GPU).
+                # --index-url makes the PyTorch CPU index the primary source,
+                # --extra-index-url adds PyPI as fallback for everything else.
+                conda_env = {
+                    "channels": ["defaults"],
+                    "dependencies": [
+                        "python=3.10",
+                        "pip",
+                        {
+                            "pip": [
+                                "--index-url https://download.pytorch.org/whl/cpu",
+                                "--extra-index-url https://pypi.org/simple",
+                                "transformers",
+                                "torch",
+                                "pandas",
+                                "mlflow",
+                            ]
+                        },
+                    ],
+                    "name": "mlflow-env",
+                }
+
                 model_info = mlflow.pyfunc.log_model(
-                    artifact_path="sentiment_model",
+                    artifact_path=self._artifact_path,
                     python_model=_SentimentPyfuncWrapper(model_id=model_id, task=task),
                     registered_model_name=registered_model_name,
                     input_example=input_example,
-                    pip_requirements=["transformers", "torch", "pandas"],
+                    conda_env=conda_env,
                 )
                 logger.info("Model logged. URI: %s", model_info.model_uri)
 
