@@ -6,29 +6,12 @@ from typing import Any
 import mlflow
 import mlflow.pyfunc
 import pandas as pd
+from mlflow.pyfunc import PythonModel
 
 from src.domain.errors import TrackingError
 from src.domain.result import Err, Ok, Result
 
 logger = logging.getLogger(__name__)
-
-
-class _SentimentPyfuncWrapper(mlflow.pyfunc.PythonModel):
-    """Wraps a HuggingFace pipeline as an MLflow pyfunc model."""
-
-    def __init__(self, model_id: str, task: str) -> None:
-        self.model_id = model_id
-        self.task = task
-
-    def load_context(self, context):
-        from transformers import pipeline
-
-        self._pipe = pipeline(self.task, model=self.model_id)
-
-    def predict(self, context, model_input: pd.DataFrame, params=None) -> pd.DataFrame:
-        texts = model_input.iloc[:, 0].tolist()
-        results = self._pipe(texts)
-        return pd.DataFrame(results)
 
 
 class MLflowAdaptor:
@@ -52,7 +35,7 @@ class MLflowAdaptor:
         model_id: str,
         registered_model_name: str,
     ) -> Result[str, TrackingError]:
-        """Log a pyfunc-wrapped model to MLflow and register in Unity Catalog."""
+        """Log a pyfunc model to MLflow and register in Unity Catalog."""
         try:
             mlflow.set_experiment(self._experiment_name)
             logger.info("MLflow experiment: %s", self._experiment_name)
@@ -69,11 +52,8 @@ class MLflowAdaptor:
                 mlflow.log_param("task", task)
 
                 logger.info("Logging model and registering as '%s'...", registered_model_name)
-                input_example = pd.DataFrame(["This movie was fantastic!"], columns=["text"])
 
-                # CPU-only torch keeps the serving container small (~200 MB vs 4+ GB GPU).
-                # --index-url makes the PyTorch CPU index the primary source,
-                # --extra-index-url adds PyPI as fallback for everything else.
+                # CPU-only torch keeps container small (~200 MB vs 4+ GB GPU)
                 conda_env = {
                     "channels": ["defaults"],
                     "dependencies": [
@@ -93,11 +73,32 @@ class MLflowAdaptor:
                     "name": "mlflow-env",
                 }
 
+                signature = mlflow.models.infer_signature(
+                    pd.DataFrame(["text input"], columns=["text"]),
+                    pd.DataFrame([{"label": "POSITIVE", "score": 0.99}]),
+                )
+
+                # Define wrapper inline so CloudPickle serialises it by value
+                # (not by module reference). This avoids the serving container
+                # needing our project's src/ package on its sys.path.
+                class _HFPyfuncWrapper(PythonModel):
+                    def load_context(self, context) -> None:
+                        from transformers import pipeline as hf_pipeline
+
+                        cfg = context.model_config
+                        self._pipe = hf_pipeline(cfg["task"], model=cfg["model_id"])
+
+                    def predict(self, context, model_input: pd.DataFrame, params=None) -> pd.DataFrame:
+                        texts = model_input.iloc[:, 0].tolist()
+                        results = self._pipe(texts)
+                        return pd.DataFrame(results)
+
                 model_info = mlflow.pyfunc.log_model(
                     artifact_path=self._artifact_path,
-                    python_model=_SentimentPyfuncWrapper(model_id=model_id, task=task),
+                    python_model=_HFPyfuncWrapper(),
+                    model_config={"model_id": model_id, "task": task},
                     registered_model_name=registered_model_name,
-                    input_example=input_example,
+                    signature=signature,
                     conda_env=conda_env,
                 )
                 logger.info("Model logged. URI: %s", model_info.model_uri)

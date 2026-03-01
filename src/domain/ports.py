@@ -56,8 +56,14 @@ class ModelServingPort(Protocol):
         endpoint_name: str,
         model_name: str,
         model_version: str,
+        *,
+        redeploy: bool = False,
     ) -> Result[dict, ServingError]:
-        """Create or update a serving endpoint for the given model version."""
+        """Deploy a serving endpoint for the given model version.
+
+        If redeploy is True, an existing endpoint is deleted and recreated.
+        If redeploy is False and the endpoint already exists, returns an error.
+        """
         ...
 
     def wait_for_ready(self, endpoint_name: str) -> Result[None, ServingError]:

@@ -4,7 +4,7 @@ import time
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.sql import Disposition, Format, StatementState
 
-from src.config import get_databricks_host, get_databricks_token
+from src.config import get_databricks_host, get_databricks_token, is_on_databricks
 
 WAREHOUSE_ID = os.environ.get("DATABRICKS_WAREHOUSE_ID", "7fa6c5266d794420")
 
@@ -12,13 +12,20 @@ _client: WorkspaceClient | None = None
 
 
 def get_workspace_client() -> WorkspaceClient:
-    """Return an authenticated Databricks WorkspaceClient (cached)."""
+    """Return an authenticated Databricks WorkspaceClient (cached).
+
+    On Databricks, native auth is used automatically.
+    Locally, host/token are read from .env.
+    """
     global _client
     if _client is None:
-        _client = WorkspaceClient(
-            host=get_databricks_host(),
-            token=get_databricks_token(),
-        )
+        if is_on_databricks():
+            _client = WorkspaceClient()
+        else:
+            _client = WorkspaceClient(
+                host=get_databricks_host(),
+                token=get_databricks_token(),
+            )
     return _client
 
 

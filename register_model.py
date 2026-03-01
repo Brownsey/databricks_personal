@@ -9,9 +9,17 @@ Usage:
 """
 
 import argparse
+import io
 import logging
 import os
 import sys
+
+# Reconfigure stdout/stderr to UTF-8 so MLflow's emoji-laden output
+# (e.g. 🏃 View run ...) doesn't crash on Windows' charmap encoding.
+if sys.stdout and hasattr(sys.stdout, "buffer"):
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+if sys.stderr and hasattr(sys.stderr, "buffer"):
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 from src.adaptors.huggingface_adaptor import HuggingFaceAdaptor
 from src.adaptors.mlflow_adaptor import MLflowAdaptor
@@ -84,6 +92,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default="Small",
         choices=["Small", "Medium", "Large"],
         help="Serving endpoint workload size",
+    )
+    deploy_group.add_argument(
+        "--redeploy",
+        action="store_true",
+        default=False,
+        help="Delete and recreate the endpoint if it already exists",
     )
     deploy_group.add_argument(
         "--no-scale-to-zero",
@@ -188,6 +202,7 @@ def main():
         ep = args.endpoint_name or args.model_name.replace("_", "-")
         print(f"  Endpoint:      {ep}")
         print(f"  Workload size: {args.workload_size}")
+        print(f"  Redeploy:      {args.redeploy}")
         print(f"  Scale-to-zero: {not args.no_scale_to_zero}")
         print(f"  Deploy timeout: {args.deploy_timeout}s")
         print(f"  Usage tracking: {args.enable_usage_tracking}")
@@ -243,6 +258,7 @@ def main():
         task=args.task,
         serving=serving,
         deploy=args.deploy,
+        redeploy=args.redeploy,
         register=not args.no_register,
         endpoint_name=args.endpoint_name,
         artifact_path=args.artifact_path,

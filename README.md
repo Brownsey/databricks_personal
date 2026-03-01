@@ -1,6 +1,8 @@
 # HuggingFace to Databricks Model Pipeline
 
-A CLI tool that downloads pre-trained models from HuggingFace, registers them in Databricks Unity Catalog, and optionally deploys them to serving endpoints with AI Gateway controls -- all from a single command.
+A CLI tool that downloads pre-trained models from HuggingFace, registers them in Databricks Unity Catalog via MLflow, and optionally deploys them to serving endpoints with AI Gateway controls -- all from a single command.
+
+Works from **any platform** (Windows, macOS, Linux). The model wrapper is serialised via CloudPickle with an inline class definition, so the serving container never needs the project's source code on its path.
 
 ## Quick Start
 
@@ -21,10 +23,16 @@ echo "DATABRICKS_TOKEN=dapi..." >> .env
 uv run python register_model.py
 ```
 
-**Register and deploy to a serving endpoint:**
+**Register and deploy to a serving endpoint (fails if endpoint already exists):**
 
 ```bash
 uv run python register_model.py --deploy
+```
+
+**Redeploy to an existing endpoint (deletes and recreates it):**
+
+```bash
+uv run python register_model.py --deploy --redeploy
 ```
 
 **Use a different HuggingFace model (e.g. text generation):**
@@ -143,6 +151,16 @@ The pipeline runs through six steps, each backed by a port/adaptor pair:
 
 Steps 1 and 4 are skipped when `--no-register` is passed. Steps 5-6 only run when `--deploy` is passed.
 
+**Deployment behaviour:** By default, `--deploy` fails fast if the endpoint already exists. Pass `--redeploy` to delete the existing endpoint and recreate it from scratch.
+
+### Model serialisation (CloudPickle inline class)
+
+The MLflow adaptor defines the pyfunc wrapper class **inline** inside `log_model()`. This is a deliberate design choice:
+
+- **CloudPickle serialises local/nested classes by value** (full bytecode), not by module reference. The serving container receives the complete class definition in the pickle payload and doesn't need the project's `src/` package on its `sys.path`.
+- **Cross-platform safety.** Because CloudPickle doesn't store file paths, models logged from Windows work identically on the Linux serving containers. No path translation or monkey-patching required.
+- **Self-contained artifacts.** Each logged model version carries everything it needs. The HuggingFace pipeline is downloaded at serving time inside `load_context()`, keeping the artifact small.
+
 ### Error handling
 
 The pipeline uses a **Rust-style `Result` type** instead of exceptions. Every operation returns `Ok(value)` or `Err(error)`, and errors propagate up the call chain with typed context:
@@ -188,6 +206,7 @@ Arguments are organized into logical groups:
 | `--deploy` | off | Deploy to a serving endpoint |
 | `--endpoint-name` | derived from `--model-name` | Override endpoint name |
 | `--workload-size` | `Small` | `Small` / `Medium` / `Large` |
+| `--redeploy` | off | Delete and recreate the endpoint if it already exists |
 | `--no-scale-to-zero` | off | Keep endpoint always warm |
 | `--deploy-timeout` | `1200` | Max seconds to wait for readiness |
 | `--region` | `us-east-2` | Target region (avoid cross-region transfer) |
@@ -222,7 +241,7 @@ Arguments are organized into logical groups:
 
 ```
 .
-├── register_model.py              # CLI entry point
+├── register_model.py              # CLI entry point + composition root
 ├── tasks.py                       # Task runner (lint, test, format)
 ├── pyproject.toml                 # Dependencies and tool config
 ├── .env                           # Databricks credentials (not committed)
@@ -237,7 +256,7 @@ Arguments are organized into logical groups:
 │   │   └── errors.py              # Typed error classes
 │   └── adaptors/
 │       ├── huggingface_adaptor.py  # HuggingFace model loading
-│       ├── mlflow_adaptor.py       # MLflow logging + UC registration
+│       ├── mlflow_adaptor.py       # MLflow logging + UC registration (inline pyfunc wrapper)
 │       ├── unity_catalog_adaptor.py# Schema management + model queries
 │       └── serving_adaptor.py      # Endpoint deployment + AI Gateway
 └── tests/
@@ -271,3 +290,16 @@ uv run python tasks.py all
 - Python >= 3.10
 - A Databricks workspace with Unity Catalog enabled
 - A `.env` file with `DATABRICKS_HOST` and `DATABRICKS_TOKEN`
+
+---
+
+## Next Steps: Databricks Asset Bundle
+
+The natural evolution is to run this pipeline as a **Databricks Asset Bundle (DAB) job** on remote compute, removing the need for a local machine entirely. A parameterised DAB job would accept `--python-params` at run time, making it easy to register any HuggingFace model from CI/CD or a scheduled trigger:
+
+```bash
+databricks bundle run register_model -t prod \
+  --python-params '["--model-id", "gpt2", "--task", "text-generation", "--model-name", "gpt2_gen", "--deploy", "--redeploy"]'
+```
+
+**Known issue on Databricks Community / free-tier workspaces:** Serverless compute on these workspaces uses path-style S3 URLs (`s3.amazonaws.com/bucket`) when copying model artifacts to Unity Catalog storage. The S3 bucket rejects these with a `PermanentRedirect`, requiring virtual-hosted-style URLs (`bucket.s3.amazonaws.com`) instead. This causes model versions to get stuck in `PENDING_REGISTRATION` indefinitely. The issue does not affect the local CLI approach (which uploads artifacts directly) and is expected to work correctly on paid Databricks workspaces with standard compute or dedicated S3 endpoints.

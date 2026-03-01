@@ -1,11 +1,9 @@
 """Standalone pyfunc model definition for MLflow serving.
 
-This file is passed as a *path* to ``mlflow.pyfunc.log_model(python_model=...)``,
-which stores the **source code** instead of cloudpickle bytecode.  This avoids
-Python-version incompatibilities (e.g. 3.14 → 3.10 code-object mismatch).
-
-At serving time MLflow imports this module, finds the model registered via
-``set_model()``, and uses it to handle prediction requests.
+``SentimentPyfuncWrapper`` is instantiated and passed to
+``mlflow.pyfunc.log_model(python_model=...)`` in the MLflow adaptor.
+The wrapper has no state at pickle time — the HuggingFace pipeline is
+downloaded at serving time inside ``load_context()``.
 """
 
 import mlflow
@@ -28,4 +26,7 @@ class SentimentPyfuncWrapper(PythonModel):
         return pd.DataFrame(results)
 
 
-mlflow.models.set_model(SentimentPyfuncWrapper())
+# set_model is only available in MLflow 3.x (code-based logging).
+# Guard for compatibility with older runtimes that use CloudPickle.
+if hasattr(mlflow.models, "set_model"):
+    mlflow.models.set_model(SentimentPyfuncWrapper())

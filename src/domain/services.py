@@ -27,6 +27,7 @@ def register_model_pipeline(
     *,
     serving: ModelServingPort | None = None,
     deploy: bool = False,
+    redeploy: bool = False,
     register: bool = True,
     endpoint_name: str | None = None,
     artifact_path: str = "sentiment_model",
@@ -126,6 +127,7 @@ def register_model_pipeline(
             endpoint_name=resolved_endpoint,
             model_name=registered_model_name,
             model_version=latest_version,
+            redeploy=redeploy,
         )
         if isinstance(deploy_result, Err):
             return deploy_result  # type: ignore[return-value]

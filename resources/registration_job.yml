@@ -1,0 +1,36 @@
+resources:
+  jobs:
+    register_model:
+      name: "[${bundle.target}] HF Model Registration"
+      description: >
+        Registers a HuggingFace model in Unity Catalog via MLflow and
+        optionally deploys a serving endpoint.  Pass --python-params to
+        override model-id, task, catalog, schema, or any other CLI flag.
+
+      tasks:
+        - task_key: register_and_deploy
+          spark_python_task:
+            python_file: ../register_model.py
+            parameters:
+              - "--catalog"
+              - ${var.catalog}
+              - "--schema"
+              - ${var.schema}
+              - "--deploy"
+              - "--redeploy"
+          environment_key: default
+
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - "numpy<2"
+              - "transformers>=4.40.0"
+              - "torch>=2.2.0"
+              - "python-dotenv>=1.0.0"
+              - "pandas>=2.0.0"
+
+      permissions:
+        - level: CAN_VIEW
+          group_name: users

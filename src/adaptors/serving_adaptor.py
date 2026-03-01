@@ -4,6 +4,7 @@ import logging
 import time
 
 from databricks.sdk import WorkspaceClient
+from databricks.sdk.errors import NotFound
 from databricks.sdk.service.serving import (
     AiGatewayConfig,
     AiGatewayInferenceTableConfig,
@@ -143,8 +144,14 @@ class ServingAdaptor:
         endpoint_name: str,
         model_name: str,
         model_version: str,
+        *,
+        redeploy: bool = False,
     ) -> Result[dict, ServingError]:
-        """Create or update a serving endpoint for the given UC model version."""
+        """Deploy a serving endpoint for the given UC model version.
+
+        If redeploy is True, an existing endpoint is deleted and recreated.
+        If redeploy is False and the endpoint already exists, returns an error.
+        """
         try:
             entity = ServedEntityInput(
                 entity_name=model_name,
@@ -155,16 +162,23 @@ class ServingAdaptor:
             config = EndpointCoreConfigInput(name=endpoint_name, served_entities=[entity])
 
             # Check if endpoint already exists
+            exists = True
             try:
                 self._client.serving_endpoints.get(name=endpoint_name)
-                logger.info("Endpoint '%s' exists, updating config...", endpoint_name)
-                self._client.serving_endpoints.update_config(
-                    name=endpoint_name,
-                    served_entities=[entity],
+            except NotFound:
+                exists = False
+
+            if exists and not redeploy:
+                return Err(
+                    ServingError(
+                        reason=f"Endpoint '{endpoint_name}' already exists. "
+                        "Use --redeploy to delete and recreate it."
+                    )
                 )
-                return Ok({"name": endpoint_name, "action": "updated"})
-            except Exception:
-                pass  # Does not exist, create it
+
+            if exists:
+                logger.info("Deleting existing endpoint '%s' for redeploy...", endpoint_name)
+                self._client.serving_endpoints.delete(name=endpoint_name)
 
             logger.info("Creating serving endpoint '%s'...", endpoint_name)
             self._client.serving_endpoints.create(
@@ -172,7 +186,8 @@ class ServingAdaptor:
                 config=config,
             )
             logger.info("Endpoint region: %s", self._region)
-            return Ok({"name": endpoint_name, "action": "created"})
+            action = "redeployed" if exists else "created"
+            return Ok({"name": endpoint_name, "action": action})
         except Exception as e:
             return Err(ServingError(reason=f"Failed to deploy endpoint '{endpoint_name}': {e}"))
 
